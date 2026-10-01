@@ -649,8 +649,8 @@ jobs:
               -e PROFILE=$profile \
               -e INCLUDE_DOCKER=$include_docker \
               -e ENABLE_PPPOE=${{ inputs.enable_pppoe }} \
-              -e PPPOE_ACCOUNT=${{ inputs.pppoe_account }} \
-              -e PPPOE_PASSWORD=${{ inputs.pppoe_password }} \
+              -e PPPOE_ACCOUNT="${{ inputs.pppoe_account }}" \
+              -e PPPOE_PASSWORD="${{ inputs.pppoe_password }}" \
             immortalwrt/imagebuilder:$tag /bin/bash /home/build/immortalwrt/build.sh
           
 
@@ -667,14 +667,36 @@ jobs:
           echo -e "\n $extra_content_ip" >> ${{ github.workspace }}/mediatek-filogic/info.md
           
           
+      - name: Set release tag
+        run: |
+          # 北京时间日期，避免覆盖上次的 release
+          BUILD_DATE=$(TZ=Asia/Shanghai date +%Y%m%d)
+          RELEASE_TAG="${{ github.event.inputs.profile }}-${BUILD_DATE}"
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
+          echo "本次 release tag: ${RELEASE_TAG}"
+
       - name: Upload ImmortalWrt as release assets
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.event.inputs.profile }}
-          name: ImmortalWrt-Wireless
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ImmortalWrt-${{ env.RELEASE_TAG }}
           body_path: ${{ github.workspace }}/mediatek-filogic/info.md
           files: |
             ${{ github.workspace }}/bin/targets/${{ env.platform }}/*
           token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Keep only the latest 10 releases
+        run: |
+          # 按创建时间倒序排列，保留最新的 10 个 release，删除其余（含 tag）
+          gh release list --limit 200 --json tagName,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[10:] | .[].tagName' \
+          | while read -r tag; do
+              if [ -n "$tag" ]; then
+                echo "删除旧 release: $tag"
+                gh release delete "$tag" --yes --cleanup-tag
+              fi
+            done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
